@@ -4,7 +4,8 @@ CC=`which clang`  # `which gcc` for Linux
 CXX=`which clang++`  # `which g++` for Linux
 FC=`which gfortran`
 
-SEACAS_SRC_DIR=??
+CONDA_PREFIX=/opt/anaconda3/envs/watershed_workflow
+SEACAS_SRC_DIR=/Users/shua784/Dropbox/github/seacas
 SEACAS_BUILD_DIR=${SEACAS_SRC_DIR}/build  # these can be changed
 SEACAS_DIR=${SEACAS_SRC_DIR}/install  # these can be changed
 
