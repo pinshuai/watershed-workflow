@@ -90,7 +90,7 @@ class NodesEdges:
     def check(self, tol=0.1):
         """Checks consistency of the interal representation."""
         logging.info(" checking graph consistency")
-        min_dist = 1.e10
+        # min_dist = 1.e10
         coords = np.array(list(self.nodes))
         kdtree = scipy.spatial.cKDTree(coords)
         bad_pairs = kdtree.query_pairs(tol)
@@ -132,7 +132,7 @@ def triangulate(hucs, rivers, **kwargs):
     nodes_edges = NodesEdges(segments)
 
     logging.info("   %i points and %i facets"%(len(nodes_edges.nodes), len(nodes_edges.edges)))
-    nodes_edges.check(tol=1)
+    nodes_edges.check(tol=0.1) # Pin changed the tolerence, default is 1
     
     logging.info(" building graph data structures")
     info = meshpy.triangle.MeshInfo()
