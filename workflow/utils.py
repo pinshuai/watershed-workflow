@@ -129,7 +129,7 @@ def round(list_of_things, digits):
     for shp in list_of_things:
         for ring in generate_rings(shp):
             ring[:] = list(np.array(ring).round(digits))
-    return list_of_things
+
 
 
 _tol = 1.e-7
@@ -184,7 +184,11 @@ def close(s1, s2, tol=_tol):
     elif isinstance(s1, shapely.geometry.LineString):
         if len(s1.coords) != len(s2.coords):
             return False
-        return np.allclose(np.array(s1.coords), np.array(s2.coords), tol, tol)
+        if np.allclose(np.array(s1.coords), np.array(s2.coords), tol, tol):
+            return True
+        if np.allclose(np.array(s1.coords), np.array(list(reversed(s2.coords))), tol, tol):
+            return True
+        return False
 
     # compare polygons
     elif type(s1) is shapely.geometry.Polygon:
@@ -461,15 +465,36 @@ def merge(ml1, ml2):
         new_ml.append(c2)
     return new_ml
 
+
+def empty_shapely(shp):
+    if shp is None:
+        return True
+    if type(shp) is shapely.geometry.GeometryCollection and len(shp) is 0:
+        return True
+    if type(shp) is shapely.geometry.LineString and len(shp.coords) is 0:
+        return True
+    if type(shp) is shapely.geometry.Polygon and len(shp.exterior.coords) is 0:
+        return True
+    return False
         
-def non_point_intersection(shp1, shp2):
-    """Checks whether an intersection is larger than a point."""
+def intersects(shp1, shp2):
+    """Checks whether an intersection exists.
+    
+    Note that intersection being empty and intersects are not always reliably
+    the same... we avoid using shapely.intersects() for this reason.
+    """
     inter = shp1.intersection(shp2)
-    int_type = type(inter)
-    if int_type == shapely.geometry.Point:
+    return not empty_shapely(inter)
+
+def non_point_intersection(shp1, shp2):
+    """Checks whether an intersection is larger than a point.
+    
+    Note that intersection being empty and intersects are not always reliably
+    the same... we avoid using intersects() for this reason.
+    """
+    inter = shp1.intersection(shp2)
+    if type(inter) == shapely.geometry.Point:
         return False
-    elif int_type == shapely.geometry.GeometryCollection and len(inter) is 0:
-        return False
-    elif int_type == shapely.geometry.LineString and len(inter.coords) is 0:
+    elif empty_shapely(inter):
         return False
     return True
