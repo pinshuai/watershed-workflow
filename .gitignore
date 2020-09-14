@@ -1,3 +1,7 @@
+workflow/sources/__pycache__/
+examples/figures/
+examples/.ipynb_checkpoints/
+workflow/__pycache__/
 .DS_Store
 examples/data
 examples/meshes
