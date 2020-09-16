@@ -1,7 +1,6 @@
-workflow/sources/__pycache__/
+**/__pycache__
 examples/figures/
 examples/.ipynb_checkpoints/
-workflow/__pycache__/
 **/.DS_Store
 .DS_Store
 examples/data
