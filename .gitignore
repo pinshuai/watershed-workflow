@@ -1,8 +1,7 @@
-**/__pycache__
-examples/figures/
-examples/.ipynb_checkpoints/
 **/.DS_Store
-.DS_Store
+**/.ipynb_checkpoints/
+**/__pycache__/
+examples/figures
 examples/data
 examples/meshes
 examples/results
