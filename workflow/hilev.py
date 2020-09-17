@@ -67,7 +67,7 @@ def get_huc(source, huc, crs=None, digits=None):
     return crs, hu_shapes[0]
 
 
-def get_hucs(source, huc, level, crs=None, digits=None):
+def get_hucs(source, huc, level=None, crs=None, digits=None):
     """Get shape objects for all HUCs at a level contained in huc.
 
     Parameters
@@ -243,7 +243,7 @@ def get_split_form_shapes(source, index_or_bounds=-1, crs=None, digits=None):
     return crs, workflow.split_hucs.SplitHUCs(shapes)
 
 
-def get_reaches(source, huc, bounds=None, crs=None, digits=None, long=None, merge=True, presimplify=None):
+def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, long=None, merge=True, presimplify=None):
     """Get reaches from hydrography source within a given HUC and/or bounding box.
 
     Collects reach datasets within a HUC and/or a bounding box.  If bounds are
@@ -306,20 +306,25 @@ def get_reaches(source, huc, bounds=None, crs=None, digits=None, long=None, merg
         
     # convert to destination crs
     native_crs = workflow.crs.from_fiona(profile['crs'])
-    if crs and not workflow.crs.equal(crs, native_crs):
+
+    if crs and not workflow.crs.equal(crs, native_crs) and cvrt:
+        logging.info("convert to destination crs : {}".format(crs))
         for reach in reaches:
             workflow.warp.shape(reach, native_crs, crs)
     else:
         crs = native_crs
 
+    logging.info("out crs: {}".format(crs))
     # round
     if digits is not None:
         workflow.utils.round(reaches, digits)
 
     # convert to shapely
+    logging.info("convert to {} shapely files".format(len(reaches)))
     reaches_s = [workflow.utils.shply(reach) for reach in reaches]
 
     if merge:
+        logging.info("merge all shapely branched lines into a single line")
         reaches_s = list(shapely.ops.linemerge(shapely.geometry.MultiLineString(reaches_s)))
 
     # not too long
