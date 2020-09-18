@@ -103,14 +103,23 @@ def get_hucs(source, huc, level=None, crs=None, digits=None):
     
     profile, hus = source.get_hucs(huc, level)
     logging.info('  found {} HUCs.'.format(len(hus)))
-    for hu in hus:
-        logging.info('  -- {}'.format(workflow.sources.utils.get_code(hu,level)))
+    logging.info('  geometry type {} '.format(type(hus)))
+
+    try:
+        for hu in hus:
+            logging.info('  -- {}'.format(workflow.sources.utils.get_code(hu,level)))
+    except:
+        logging.warning("only 1 fiona obj is found!")
+        logging.info('  -- {}'.format(workflow.sources.utils.get_code(hus,level)))
     
     # convert to destination crs
     native_crs = workflow.crs.from_fiona(profile['crs'])
     if crs and not workflow.crs.equal(crs, native_crs):
-        for hu in hus:
-            workflow.warp.shape(hu, native_crs, crs)
+        try:
+            for hu in hus:
+                workflow.warp.shape(hu, native_crs, crs)
+        except:
+            workflow.warp.shape(hus, native_crs, crs)
     else:
         crs = native_crs
 
@@ -119,9 +128,13 @@ def get_hucs(source, huc, level=None, crs=None, digits=None):
         workflow.utils.round(hus, digits)
 
     # convert to shapely
-    hu_shapes = [workflow.utils.shply(hu) for hu in hus]
-    return crs, hu_shapes
+    logging.info('convert fiona obj to shapely...')
 
+    try:
+        hu_shapes = [workflow.utils.shply(hu) for hu in hus]
+    except:
+        hu_shapes = workflow.utils.shply(hus)
+    return crs, hu_shapes
 
 def get_split_form_hucs(source, huc, level=None, crs=None, digits=None):
     """Get a SplitHUCs object for all HUCs at level contained in huc.
