@@ -1,12 +1,8 @@
-<<<<<<< HEAD
-examples/meshes
-examples/results
-data/DEM
-examples/data
-||||||| be69297
-=======
+examples/figures
 examples/data
 examples/meshes
 examples/results
 data/DEM
->>>>>>> 3e3e409c2631092ea53e72154c94436fdcdcb16f
+**/.DS_Store
+**/__pycache__/
+**/.ipynb_checkpoints/
