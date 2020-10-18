@@ -44,7 +44,7 @@ class FileManagerNED:
     """
     def __init__(self, resolution='1/3 arc-second', file_format='IMG'):
         """Create the manager."""
-        self.name = 'National Elevation Dataset (NED)'
+        self.name = 'National Elevation Dataset (NED); resolution: {}'.format(resolution)
         self.file_format = file_format
 
         if resolution == '1/3 arc-second':

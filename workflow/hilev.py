@@ -279,6 +279,8 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
     crs : crs-type, optional
         Output coordinate system and coordinate system of bounds.  Defaults to
         the source's crs.
+    cvrt : bool, optional
+        If true, convert river network CRS based on watershed crs
     digits : int, optional
         Number of digits to round coordinates to.
     long : float, optional
