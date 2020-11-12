@@ -4,8 +4,6 @@ Utilities for pulling soil and geology information from various data source
 - Get soil property such as permeability, porosity, and van Genutchen parameters from SSURGO/gSSURGO/gNATSGO .gdb files (https://nrcs.app.box.com/v/soils/folder/17971946225).
 - Get geology property (i.e., permeability and porosity) from GLHYMPS v2 (https://dataverse.scholarsportal.info/dataset.xhtml?persistentId=doi:10.5683/SP2/TTJNIU) 
 
-Contact: Pin Shuai (pin.shuai@pnnl.gov)
-
 Usage:
 -----
     soil_prop = get_soil_property_from_SSURGO(SSURGO.gdb)
@@ -28,29 +26,58 @@ import logging
 import matplotlib.pyplot as plt
 
 def read_attr_tables_from_gdb(gdb_file):
+    """
+    Read geodatabase file using geopandas and get the attribute tables (ie. chorizon and component). Preprocess tables to get soil layer thickness and porosity. For missing porosity values, assume porosity = saturated water content.
+    Parameters:
+    ----
+    gdb_file: path to gSSURGO or gNATSGO .gdb file.
+    
+    Returns:
+    ----
+    df_chorizon: preprocessed horizon dataframe
+    df_component: preprocessed component dataframe
+    """
     df_chorizon = gpd.read_file(fname_soil_gdb, driver='FileGDB', layer='chorizon')
     df_component = gpd.read_file(fname_soil_gdb, driver='FileGDB', layer='component')
     
     # rename columns    
     horizon_rename_list = {'hzdept_r':'top depth [cm]', 'hzdepb_r':'bot depth [cm]', 'ksat_r':'sat K [um/s]', 
-                  'sandtotal_r':'total sand pct [%]', 'silttotal_r':'total silt pct [%]', 'claytotal_r':'total clay pct [%]',
-                 'dbthirdbar_r':'bulk density [g/cm^3]', 'partdensity':'particle density [g/cm^3]'}
+                          'sandtotal_r':'total sand pct [%]', 'silttotal_r':'total silt pct [%]', 
+                           'claytotal_r':'total clay pct [%]',
+                         'dbthirdbar_r':'bulk density [g/cm^3]', 'partdensity':'particle density [g/cm^3]',
+                          'wsatiated_r':'saturated water content [%]'}
 
     df_chorizon.rename(columns = horizon_rename_list, inplace = True)
     df_component.rename(columns={'comppct_r':'component pct [%]'}, inplace = True)
     
     # preprocess data
     df_chorizon['thickness [cm]'] = df_chorizon['bot depth [cm]'] - df_chorizon['top depth [cm]']
-    df_chorizon.loc[pd.isnull(df_chorizon['particle density [g/cm^3]']), 'particle density [g/cm^3]'] = 2.65
+    # assume porosity = saturated water content
     df_chorizon['porosity [-]'] = 1 - df_chorizon['bulk density [g/cm^3]']/df_chorizon['particle density [g/cm^3]']
+    df_chorizon.loc[pd.isnull(df_chorizon['porosity [-]']), 'porosity [-]'] = df_chorizon.loc[pd.isnull(df_chorizon['porosity [-]']), 'saturated water content [%]']/100    
+#     df_chorizon.loc[pd.isnull(df_chorizon['particle density [g/cm^3]']), 'particle density [g/cm^3]'] = 2.65
+#     df_chorizon['porosity [-]'] = 1 - df_chorizon['bulk density [g/cm^3]']/df_chorizon['particle density [g/cm^3]']
     
     logging.info(f'found {len(df_component["mukey"].unique())} unique MUKEYs.')
     return df_chorizon, df_component        
 
 def get_aggregated_mukey_values(df_chorizon, df_component):
+    """
+    Aggregate component values by component percentage to get MUKEY property.
     
-    horizon_selected_cols = ['cokey', 'chkey', 'thickness [cm]', 'top depth [cm]', 'bot depth [cm]', 'sat K [um/s]', 'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]',
-           'bulk density [g/cm^3]', 'particle density [g/cm^3]', 'porosity [-]']
+    Parameters:
+    ----
+    df_chorizon: chorizon table.
+    df_component: component table.
+    
+    Returns:
+    ----
+    mukey_agg_df: aggregated mukey property.
+    
+    """
+    horizon_selected_cols = ['cokey', 'chkey', 'thickness [cm]', 'top depth [cm]', 'bot depth [cm]', 'sat K [um/s]', 
+                             'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]',
+                           'bulk density [g/cm^3]', 'particle density [g/cm^3]', 'porosity [-]']
     mukey_agg_var = ['mukey', 'agg_Ksat [um/s]', 'agg_sand_pct [%]', 
            'agg_silt_pct [%]', 'agg_clay_pct [%]', 'agg_bulk_density [g/cm^3]', 'agg_porosity [-]', 'agg_soil_depth [cm]'
           ]
@@ -87,6 +114,21 @@ def get_aggregated_mukey_values(df_chorizon, df_component):
     return mukey_agg_df
 
 def get_aggregated_component_values(df_chorizon, imukey_df, horizon_selected_cols, area_ave_var, depth_ave_var):
+    """
+    Aggregate horizon value by layer thickness to get component property. 
+    
+    Parameters:
+    ----
+    df_chorizon: horizon table
+    imukey_df: individual mukey df contains component keys
+    horizon_selected_cols: selected columns for horizon table
+    area_ave_var: area-averaged variables
+    depth_ave_var: depth-averaged variables
+    
+    Returns:
+    ----
+    comp_agg_df: aggregated component property
+    """
 #     area_ave_var = depth_ave_var + ['soil depth [cm]']
     comp_list = area_ave_var + ['cokey']
     
@@ -130,6 +172,21 @@ def get_aggregated_component_values(df_chorizon, imukey_df, horizon_selected_col
     return comp_agg_df
 
 def get_vgm_from_Rosetta(data, model_type):
+    """
+    Return van Genutchen model parameters using Rosetta v3 model ( Zhang and Schaap, 2017 WRR).
+    
+    Parameters: 
+    -----
+    data: numpy array
+        Array contains input data in dim(nvar, nsamples)
+    model_type: int. 2 or 3
+        Rosetta model type. 2--using sand/silt/clay pct; 3--using sand/silt/clay pct + bulk density
+        
+    Returns:
+    ----
+    vgm_new: numpy array
+        van Genutchen model parameters correspond to model type.
+    """
     with DB(host='localhost', user='root', db_name='Rosetta', sqlite_path=fname_sqlite) as db:
         
         #convert data from 1d array to nd matrix if necessary
@@ -160,7 +217,19 @@ def get_vgm_from_Rosetta(data, model_type):
     #     logging.info(f'\n|theta_r [cm^3/cm^3]|theta_s [cm^3/cm^3]|alpha [1/cm]| n [-] |Ks [cm/day]|\n{vgm_new}')
     return vgm_new
 
-def get_soil_property_from_SSURGO(gdb_file):
+def get_soil_property_from_SSURGO(gdb_file, outfile= None):
+    """
+    Aggregate soil property for each MUKEY from SSURGO/NATSGO; get van Genutchen model parameters using Rosetta v3.
+    
+    Parameters:
+    ----
+    gdb_file: SSURGO or NATSGO gdb file path
+    outfile: exported csv file
+    
+    Returns:
+    ----
+    soil_prop: datafrme
+    """
     T0=T.time()
     # get column name and variables. These are hard coded for now.
 #     horizon_selected_cols = ['cokey', 'chkey', 'thickness [cm]', 'top depth [cm]', 'bot depth [cm]', 'sat K [um/s]', 'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]',
@@ -202,14 +271,25 @@ def get_soil_property_from_SSURGO(gdb_file):
     soil_prop['Rosetta_k [m^2]'] = soil_prop['Rosetta_Ks [cm/day]']/100/86400*9.1e-8
     logging.info(f"--Processing done-- \n time spent:{T.time()-T0} s")
     
-    statename = re.split('_|\.', gdb_file)[-2]
-    fname = f'./soil_prop_{statename}.csv'
+    if outfile == None:
+        statename = re.split('_|\.', gdb_file)[-2]
+        fname = f'./soil_prop_{statename}.csv'
+    else: 
+        fname = outfile
     logging.info(f"saving soil parameters to {fname}")
     soil_prop.to_csv(fname, index = False)
     
     return soil_prop
 
-def get_GLHYMPSv2_property(shp_file):
+def get_GLHYMPSv2_property(shp_file, outfile = None):
+    """
+    Retrieve geology property such as K and porosity from GLHYMPS.
+    
+    Arguments:
+    ----
+        shp_file: path to shapefile of GLHYMPS.
+        outfile: path to exported csv file.
+    """
     with fiona.open(shp_file, mode='r') as fid:
         profile = fid.profile
         geology = [r for (i,r) in fid.items()]
@@ -221,7 +301,11 @@ def get_GLHYMPSv2_property(shp_file):
     
     geol_property = pd.DataFrame({'ID':obj_ids, 'permeability [m^2]':k, 'logk_stdev [-]':k_std, 'porosity [-]':porosity})
     
-    fname = f'./geol_prop.csv'
+    # saving geology parameter file
+    if outfile == None:
+        fname = './geol_prop.csv'
+    else:
+        fname = outfile
     logging.info(f"saving geology parameters to {fname}")
     geol_property.to_csv(fname, index = False)
     
