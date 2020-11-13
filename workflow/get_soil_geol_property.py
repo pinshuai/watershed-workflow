@@ -37,8 +37,8 @@ def read_attr_tables_from_gdb(gdb_file):
     df_chorizon: preprocessed horizon dataframe
     df_component: preprocessed component dataframe
     """
-    df_chorizon = gpd.read_file(fname_soil_gdb, driver='FileGDB', layer='chorizon')
-    df_component = gpd.read_file(fname_soil_gdb, driver='FileGDB', layer='component')
+    df_chorizon = gpd.read_file(gdb_file, driver='FileGDB', layer='chorizon')
+    df_component = gpd.read_file(gdb_file, driver='FileGDB', layer='component')
     
     # rename columns    
     horizon_rename_list = {'hzdept_r':'top depth [cm]', 'hzdepb_r':'bot depth [cm]', 'ksat_r':'sat K [um/s]', 
@@ -171,7 +171,7 @@ def get_aggregated_component_values(df_chorizon, imukey_df, horizon_selected_col
             
     return comp_agg_df
 
-def get_vgm_from_Rosetta(data, model_type):
+def get_vgm_from_Rosetta(data, sqlite_path, model_type):
     """
     Return van Genutchen model parameters using Rosetta v3 model ( Zhang and Schaap, 2017 WRR).
     
@@ -187,7 +187,7 @@ def get_vgm_from_Rosetta(data, model_type):
     vgm_new: numpy array
         van Genutchen model parameters correspond to model type.
     """
-    with DB(host='localhost', user='root', db_name='Rosetta', sqlite_path=fname_sqlite) as db:
+    with DB(host='localhost', user='root', db_name='Rosetta', sqlite_path=sqlite_path) as db:
         
         #convert data from 1d array to nd matrix if necessary
         if data.ndim ==1:
@@ -217,13 +217,18 @@ def get_vgm_from_Rosetta(data, model_type):
     #     logging.info(f'\n|theta_r [cm^3/cm^3]|theta_s [cm^3/cm^3]|alpha [1/cm]| n [-] |Ks [cm/day]|\n{vgm_new}')
     return vgm_new
 
-def get_soil_property_from_SSURGO(gdb_file, outfile= None):
+def get_soil_property_from_SSURGO(gdb_file, sqlite_path, rosetta_model = 3, outfile= None):
     """
     Aggregate soil property for each MUKEY from SSURGO/NATSGO; get van Genutchen model parameters using Rosetta v3.
     
     Parameters:
     ----
     gdb_file: SSURGO or NATSGO gdb file path
+    
+    sqlite_path: relative path to Rosetta.sqlite. 
+                It is located in watershed-workflow/workflow_tpls/rosetta_v3.0beta/sqlite/Rosetta.sqlite
+    rosetta_model: int
+                Type of Rosetta model. Default is 3 (i.e., need sand/silt/clay pct and bulk density)
     outfile: exported csv file
     
     Returns:
@@ -260,7 +265,7 @@ def get_soil_property_from_SSURGO(gdb_file, outfile= None):
     # need to transpose the data so that the array have the shape (nvar, nsample) 
     data = df[vgm_input_header].values.T
     
-    vgm = get_vgm_from_Rosetta(data, model_type = 3)
+    vgm = get_vgm_from_Rosetta(data, sqlite_path, model_type = rosetta_model)
     
     vgm_df = pd.DataFrame(vgm, columns=vgm_output_header)
     vgm_df['mukey'] = df['mukey'].values
