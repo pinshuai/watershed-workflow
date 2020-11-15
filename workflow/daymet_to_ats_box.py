@@ -98,13 +98,15 @@ class Date:
         return '{}-{}'.format(self.doy, self.year)
     
 def stringToDate(s):
+    """convert string to Date format (s.doy, s.year)"""
     if len(s) == 4:
         return Date(1, int(s))
 
     doy_year = s.split('-')
     if len(doy_year) != 2 or len(doy_year[1]) != 4:
         raise RuntimeError('Invalid date format: {}, should be DOY-YEAR'.format(s))
-        return Date(int(doy_year[0]), int(doy_year[1]))
+
+    return Date(int(doy_year[0]), int(doy_year[1]))
 
 def numDays(start, end):
     """Time difference -- assumes inclusive end date."""
@@ -112,7 +114,7 @@ def numDays(start, end):
 
 def loadFile(fname, var):
     with netCDF4.Dataset(fname, 'r') as nc:
-        x = nc.variables['x'][:] * 1000. # km to m
+        x = nc.variables['x'][:] * 1000. # km to m; raw netCDF file has km unit 
         y = nc.variables['y'][:] * 1000. # km to m
         time = nc.variables['time'][:]
         assert(len(time) == 365)
@@ -133,6 +135,7 @@ def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
     T0 = time.time()
     if vars is None:
         vars = VALID_VARIABLES
+        logging.info(f"downloading variables: {VALID_VARIABLES}")
 
     dat = dict()
     d_inited = False
@@ -146,6 +149,7 @@ def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
                 d_inited = True
 
             # stuff v in the right spot
+            # dim(nband, nrow, ncol) has been transposed to dim(nband, ncol, nrow)
             if year == start.year and year == end.year:
                 dat[var][:,:,:] = np.transpose(v[start.doy-1:end.doy,:,:], (0,2,1)) # changed PS
             elif year == start.year:
@@ -205,6 +209,7 @@ def writeATS(time, dat, x, y, attrs, filename):
         fid.create_dataset('col coordinate [m]', data=y)
 
         for key in dat.keys():
+            # dat must has shape (nband, ncol, nrow) or (nband, width, height) since HDF5 uses row-major ordering
             assert(dat[key].shape[0] == time.shape[0])
             assert(dat[key].shape[1] == x.shape[0])
             assert(dat[key].shape[2] == y.shape[0])
@@ -278,20 +283,28 @@ def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None):
     """
     var_list = list(raw.keys())
     logging.debug(f"variables: {var_list}")
-    logging.debug(f"raw shape in (nband, ncol, nrow): {raw[list(raw.keys())[0]].shape}")
-    nband = raw[list(raw.keys())[0]].shape[0]    
+    logging.debug(f"raw shape in (nband, ncol, nrow): {raw[var_list[0]].shape}")
+    
+    if raw[var_list[0]].ndim == 3:
+        nband = raw[var_list[0]].shape[0]   
+    else:
+        nband = 1 
     
     daymet_crs = workflow.crs.daymet_crs()
     logging.debug(f'daymet crs: {daymet_crs}')
     
-    if 'kilometre' in daymet_crs:
+    # make sure tranform function is consistent with the unit used in CRS
+    unit = daymet_crs.to_dict()['units']
+    if unit == 'km':
         dx = dy = 1.0 # km
         transform = (x.min()/1000 - dx/2, dx, 0.0, y.max()/1000 + dy/2, 0.0, -dy) # accepted format(xmin, dx, 0, ymax, 0, -dy)
         affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
-    else:
+    elif unit == 'm':
         dx = dy = 1000.0 # m
         transform = (x.min() - dx/2, dx, 0.0, y.max() + dy/2, 0.0, -dy)
         affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
+    else: 
+        raise RuntimeError(f'Daymet CRS unit: {unit} is not recognized! Supported units are m or km.')
     logging.debug(f'transform: {transform}')
     logging.debug(f'Affine: {affine}') 
     
@@ -313,10 +326,11 @@ def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None):
     logging.info(f'reprojecting to new crs: {dst_crs}') 
     new_dat = {}
     for var in var_list:
-        # output array has the shape of (bands, rows, columns), the rows and columns are flipped!!
-        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=raw[var], dst_crs=dst_crs, dst_nodata = dst_nodata)
+        # input raw array has the shape of (bands, cols, rows), need to transpose to (bands, rows, cols) for warp.raster()! 
+        idat = raw[var].swapaxes(1,2)
+        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=idat, dst_crs=dst_crs, dst_nodata = dst_nodata)
 
-        # flip rows and columns to have shape of (bands, columns, rows)
+        # dst_array has shape of (bands, rows, cols) need to flip back to (bands, cols, rows)
         dst_raster = dst_raster.swapaxes(1,2)
         new_dat[var] = dst_raster    
     
@@ -327,7 +341,7 @@ def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None):
     
     new_x, new_y = xy_from_profile(dst_profile)
     
-    return new_x, new_y, new_dat
+    return new_x, new_y, new_extent, new_dat, daymet_profile
 
 
 if __name__ == '__main__':
