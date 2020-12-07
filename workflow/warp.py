@@ -96,7 +96,7 @@ def shape(feature, old_crs, new_crs):
     return feature
                     
     
-def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = None, resampling_method = rasterio.warp.Resampling.nearest):
+def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = None, resolution = None, resampling_method = rasterio.warp.Resampling.nearest):
     """Warp a raster from src_profile to dst_crs or dst_profile."""
     if (dst_crs is None and dst_profile is None):
         return src_profile, src_array
@@ -127,7 +127,8 @@ def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = 
 
         # Calculate the ideal dimensions and transformation in the new crs
         dst_transform, dst_width, dst_height = rasterio.warp.calculate_default_transform(
-            src_profile['crs'], dst_crs_rasterio, src_profile['width'], src_profile['height'], *src_bounds)
+            src_profile['crs'], dst_crs_rasterio, src_profile['width'], src_profile['height'], 
+            *src_bounds, resolution = resolution)
 
         # update the relevant parts of the profile
         dst_profile.update({
@@ -138,7 +139,7 @@ def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = 
             'nodata': dst_nodata
         })
 
-    logging.info(f"src array shape: {src_array.shape}")
+    # logging.info(f"src array shape: {src_array.shape}")
     # Reproject and return
     if src_array.ndim == 3:
         nband = src_array.shape[0]
@@ -150,7 +151,7 @@ def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = 
         assert(src_array.shape == (src_profile['height'], src_profile['width']))
         dst_array = np.empty((dst_height, dst_width), dtype=src_array.dtype)
 
-    logging.info(f"dst array shape: {dst_array.shape}")
+    # logging.info(f"dst array shape: {dst_array.shape}")
     dst_profile.update({'count': nband})
 
     rasterio.warp.reproject(src_array, dst_array, src_transform = src_profile['transform'], src_crs=src_profile['crs'],

@@ -75,7 +75,7 @@ class FileManagerNLCD:
         return layer, year, location
         
 
-    def get_raster(self, shply, crs):
+    def get_raster(self, shply, crs, force = False):
         """Download and read a DEM for this shape, clipping to the shape.
 
         Parameters

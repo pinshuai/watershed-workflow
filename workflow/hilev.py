@@ -124,7 +124,7 @@ def get_hucs(source, huc, level=None, crs=None, digits=None):
         crs = native_crs
 
     # round
-    if digits is not None:
+    if digits != None:
         workflow.utils.round(hus, digits)
 
     # convert to shapely
@@ -207,7 +207,7 @@ def get_shapes(source, index_or_bounds=None, crs=None, digits=None):
         source = workflow.sources.manager_shape.FileManagerShape(source)
 
     profile, shps = source.get_shapes(index_or_bounds, crs)
-
+    logging.info(f"src CRS: {profile['crs']}")
     # convert to destination crs
     native_crs = workflow.crs.from_fiona(profile['crs'])
     if crs and not workflow.crs.equal(crs, native_crs):
@@ -217,7 +217,7 @@ def get_shapes(source, index_or_bounds=None, crs=None, digits=None):
         crs = native_crs
         
     # round
-    if digits is not None:
+    if digits != None:
         workflow.utils.round(shps, digits)
 
     # convert to shapely
@@ -312,7 +312,7 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
     profile, reaches = source.get_hydro(huc, bounds, crs)
     logging.info("  found {} reaches".format(len(reaches)))
 
-    if presimplify is not None:
+    if presimplify != None:
         # convert to shapely and simplify
         reaches_s = [workflow.utils.shply(r).simplify(presimplify) for r in reaches] 
 
@@ -331,7 +331,7 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
 
     logging.info("out crs: {}".format(crs))
     # round
-    if digits is not None:
+    if digits != None:
         workflow.utils.round(reaches, digits)
 
     # convert to shapely
@@ -343,7 +343,7 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
         reaches_s = list(shapely.ops.linemerge(shapely.geometry.MultiLineString(reaches_s)))
 
     # not too long
-    if long is not None:
+    if long != None:
         n_r = len(reaches_s)
         reaches_s = [reach for reach in reaches_s if reach.length < long]
         logging.info("  filtered {} of {} due to length criteria {}".format(n_r - len(reaches_s), n_r, long))
@@ -352,9 +352,9 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
     return crs, reaches_s
 
 
-def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0.,
+def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0., force = False,
                         mask=False, nodata=-1):
-    """Collects a raster DEM that covers the requested shape.
+    """Collects a raster (e.g., DEM) that covers the requested shape.
 
     Parameters
     ----------
@@ -369,6 +369,8 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0.,
     buffer : double, optional
         Size of a buffer, in units of the shape's CRS, added to shape to ensure
         pixels cover the entire shape.  Default is 0.
+    force : bool, optional=False
+        If True, redownloading the raster regardless whether it exists.
     mask : bool, optional=False
         If True, mask the raster outside of shape.
     nodata : dtype, optional=-1
@@ -393,11 +395,16 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0.,
     shape = shape.buffer(buffer)
 
     logging.info("collecting raster")
-    profile, raster = source.get_raster(shape, crs)
+    if type(source) is str:
+        logging.info('loading file: "{}"'.format(source))
+        source = workflow.sources.manager_raster.FileManagerRaster(source)
+        profile, raster = source.get_clipped_raster(shape, crs, nodata = nodata)
+    else:
+        profile, raster = source.get_raster(shape, crs, force = force)
     logging.info("Got raster of shape: {}".format(raster.shape))
 
     # warp the raster to the requested output
-    if raster_crs is not None:
+    if raster_crs != None:
         profile, raster = workflow.warp.raster(profile, raster, raster_crs)
     else:
         raster_crs = workflow.crs.from_rasterio(profile['crs'])
@@ -599,7 +606,7 @@ def simplify_and_prune(hucs, reaches, filter=True, simplify=10, prune_reach_size
     logging.info("  HUC median seg length: %g"%np.median(np.array(mins)))
     return rivers
     
-def triangulate(hucs, rivers, diagnostics=True, verbosity=1, tol = 1,
+def triangulate(hucs, rivers, diagnostics=True, verbosity=1, ignore_rivers = False, tol = 1,
                 refine_max_area=None, refine_distance=None, refine_max_edge_length=None,
                 refine_min_angle=None, enforce_delaunay=False):
     """Triangulates HUCs and rivers.
@@ -614,7 +621,10 @@ def triangulate(hucs, rivers, diagnostics=True, verbosity=1, tol = 1,
     reaches : list(LineString)
         A list of reaches from, e.g., get_reaches()
     diagnostics : bool, optional
-        Plot diagnostics graphs of the triangle refinement.    
+        Plot diagnostics graphs of the triangle refinement.   
+    ignore_rivers: bool, optional
+        ignore river networks and let meshes refine close to rivers. This is useful
+        if using existing rivers produces problemic meshes. 
     tol : float, optional
         Set tolerance for minimum distance between two nodes. The unit is the same as 
         the watershed crs (e.g., the unit is meter in UTM coordinates). The default is 1.
@@ -671,16 +681,17 @@ def triangulate(hucs, rivers, diagnostics=True, verbosity=1, tol = 1,
     logging.info("-"*30)
 
     refine_funcs = []
-    if refine_max_area is not None:
+    if refine_max_area != None:
         refine_funcs.append(workflow.triangulation.refine_from_max_area(refine_max_area))
-    if refine_distance is not None:
+    if refine_distance != None:
         refine_funcs.append(workflow.triangulation.refine_from_river_distance(*refine_distance, rivers))
-    if refine_max_edge_length is not None:
+    if refine_max_edge_length != None:
         refine_funcs.append(workflow.triangulation.refine_from_max_edge_length(refine_max_edge_length))
     def my_refine_func(*args):
         return any(rf(*args) for rf in refine_funcs)        
 
     vertices, triangles = workflow.triangulation.triangulate(hucs, rivers,
+                                                             ignore_rivers = ignore_rivers,
                                                              tol = tol,
                                                              verbose=verbose,
                                                              refinement_func=my_refine_func,
@@ -788,6 +799,11 @@ def values_from_raster(points, points_crs, raster, raster_profile, algorithm='ne
         Array of raster values interpolated onto the points.
 
     """
+
+    # get the first band if 3D array
+    if raster.ndim == 3:
+        raster = raster[0, :, :]
+
     raster_crs = workflow.crs.from_rasterio(raster_profile['crs'])
     points_raster_crs = np.array(workflow.warp.xy(points[:,0], points[:,1], points_crs, raster_crs)).transpose()
     if algorithm == 'nearest':
