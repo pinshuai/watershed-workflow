@@ -6,8 +6,11 @@ Utilities for pulling soil and geology information from various data source
 
 Usage:
 -----
-    soil_prop = get_soil_property_from_SSURGO(SSURGO.gdb)
-    geol_prop = get_GLHYMPSv2_property(GLHYMPS.shp)
+    soil_prop = get_soil_property_from_SSURGO(SSURGO_gdb_file, sqlite_path, rosetta_model = 3, outfile= None)
+    geol_prop = get_GLHYMPSv2_property(GLHYMPS_file, outfile = None)
+
+Author: Pin Shuai (pin.shuai@pnnl.gov)
+Date: 11/01/2020
 """
 
 
@@ -52,11 +55,10 @@ def read_attr_tables_from_gdb(gdb_file):
     
     # preprocess data
     df_chorizon['thickness [cm]'] = df_chorizon['bot depth [cm]'] - df_chorizon['top depth [cm]']
-    # assume porosity = saturated water content
+
     df_chorizon['porosity [-]'] = 1 - df_chorizon['bulk density [g/cm^3]']/df_chorizon['particle density [g/cm^3]']
+    # assume null porosity = saturated water content
     df_chorizon.loc[pd.isnull(df_chorizon['porosity [-]']), 'porosity [-]'] = df_chorizon.loc[pd.isnull(df_chorizon['porosity [-]']), 'saturated water content [%]']/100    
-#     df_chorizon.loc[pd.isnull(df_chorizon['particle density [g/cm^3]']), 'particle density [g/cm^3]'] = 2.65
-#     df_chorizon['porosity [-]'] = 1 - df_chorizon['bulk density [g/cm^3]']/df_chorizon['particle density [g/cm^3]']
     
     logging.info(f'found {len(df_component["mukey"].unique())} unique MUKEYs.')
     return df_chorizon, df_component        
@@ -75,6 +77,7 @@ def get_aggregated_mukey_values(df_chorizon, df_component):
     mukey_agg_df: aggregated mukey property.
     
     """
+    # get column name and variables. These are hard coded for now.
     horizon_selected_cols = ['cokey', 'chkey', 'thickness [cm]', 'top depth [cm]', 'bot depth [cm]', 'sat K [um/s]', 
                              'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]',
                            'bulk density [g/cm^3]', 'particle density [g/cm^3]', 'porosity [-]']
@@ -194,18 +197,12 @@ def get_vgm_from_Rosetta(data, sqlite_path, model_type):
             logging.info(f"data is 1-D array, reshaping to (nvar,1)")
             data = data.reshape(data.shape[0],1)
         # choose the right model corresponding to data inputs
-#         model_type = 3
         ptf_model=PTF_MODEL(model_type, db) 
         logging.info(f"--Processing--\n get van Genutchen parameters from Rosetta (model {model_type})")
-#         T0=T.time()
         # with sum_data=False you get the raw output WITHOUT Summary statistics
-#         try:
-        res_dict = ptf_model.predict(data, sum_data=True) 
-#         except:
-#             logging.info(f"data may be 1-D, try reshaping to (nvar,1)")
-            
 
-#         logging.info(f"--Processing done-- \n time spent:{T.time()-T0}s")
+        res_dict = ptf_model.predict(data, sum_data=True) 
+            
         vgm_name=res_dict['var_names']
 
         # res_dict['sum_res_mean'] output log10 of VG-alpha,VG-n, and Ks
@@ -213,8 +210,8 @@ def get_vgm_from_Rosetta(data, sqlite_path, model_type):
         vgm_new=np.stack((vgm_mean[0],vgm_mean[1],10**vgm_mean[2],10**vgm_mean[3],10**vgm_mean[4]))
         # transpose to match the data input format
         vgm_new=vgm_new.transpose()
-    #     logging.info(f'output van Genutchen parameters:')
-    #     logging.info(f'\n|theta_r [cm^3/cm^3]|theta_s [cm^3/cm^3]|alpha [1/cm]| n [-] |Ks [cm/day]|\n{vgm_new}')
+        logging.debug(f'output van Genutchen parameters:')
+        logging.debug(f'\n|theta_r [cm^3/cm^3]|theta_s [cm^3/cm^3]|alpha [1/cm]| n [-] |Ks [cm/day]|\n{vgm_new}')
     return vgm_new
 
 def get_soil_property_from_SSURGO(gdb_file, sqlite_path, rosetta_model = 3, outfile= None):
@@ -236,15 +233,7 @@ def get_soil_property_from_SSURGO(gdb_file, sqlite_path, rosetta_model = 3, outf
     soil_prop: datafrme
     """
     T0=T.time()
-    # get column name and variables. These are hard coded for now.
-#     horizon_selected_cols = ['cokey', 'chkey', 'thickness [cm]', 'top depth [cm]', 'bot depth [cm]', 'sat K [um/s]', 'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]',
-#            'bulk density [g/cm^3]', 'particle density [g/cm^3]', 'porosity [-]']
-#     mukey_agg_var = ['mukey', 'agg_Ksat [um/s]', 'agg_sand_pct [%]', 
-#                'agg_silt_pct [%]', 'agg_clay_pct [%]', 'agg_bulk_density [g/cm^3]', 'agg_porosity [-]', 'agg_soil_depth [cm]'
-#               ]
-#     depth_ave_var = ['sat K [um/s]', 'total sand pct [%]', 'total silt pct [%]', 'total clay pct [%]', 'bulk density [g/cm^3]', 'porosity [-]']
-#     area_ave_var = depth_ave_var + ['soil depth [cm]']
-#     comp_list = area_ave_var + ['cokey']
+
     
     vgm_input_header = ['agg_sand_pct [%]', 'agg_silt_pct [%]', 'agg_clay_pct [%]', 'agg_bulk_density [g/cm^3]']
     vgm_output_header = ['theta_r [cm^3/cm^3]', 'theta_s [cm^3/cm^3]', 'alpha [1/cm]', 'n [-]', 'Rosetta_Ks [cm/day]']
