@@ -143,7 +143,7 @@ def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
     for year in range(start.year, end.year+1):
         for var in vars:
             fname = downloadFile(tmpdir, bounds, year, var, force)
-            x,y,v = loadFile(fname, var)
+            x,y,v = loadFile(fname, var) # returned v.shape(nband, nrow, ncol)
             if not d_inited:
                 initData(dat, vars, numDays(start,end), len(x), len(y))
                 d_inited = True
@@ -164,8 +164,9 @@ def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
 
 def daymetToATS(dat):
     """Accepts a numpy named array of DayMet data and returns a dictionary ATS data."""
+    logging.debug(f"input dat shape: {dat['srad'].shape}")
     dout = dict()
-    logging.info('Converting to ATS')
+    logging.info('Converting to ATS met input')
 
     mean_air_temp_c = (dat['tmin'] + dat['tmax'])/2.0
     precip_ms = dat['prcp'] / 1.e3 / 86400. # mm/day --> m/s
@@ -182,6 +183,8 @@ def daymetToATS(dat):
     dout['precipitation snow [m SWE s^-1]'] = np.where(mean_air_temp_c < 0, precip_ms, 0)
 
     dout['wind speed [m s^-1]'] = 4. * np.ones_like(dout['relative humidity [-]'])
+
+    logging.debug(f"output dout shape: {dout['incoming shortwave radiation [W m^-2]'].shape}")
     return time, dout
 
 def getAttrs(bounds, start, end):
@@ -200,22 +203,35 @@ def writeATS(time, dat, x, y, attrs, filename):
     """Accepts a dictionary of ATS data and writes it to HDF5 file."""
 #     T0 = time.time()
     logging.info('Writing ATS file: {}'.format(filename))
+
+    try:
+        os.remove(filename)
+    except FileNotFoundError:
+        pass
+
     with h5py.File(filename, 'w') as fid:
         fid.create_dataset('time [s]', data=time)
         assert(len(x.shape) == 1)
         assert(len(y.shape) == 1)
-
-        fid.create_dataset('row coordinate [m]', data=x)        
-        fid.create_dataset('col coordinate [m]', data=y)
+       
+        # ATS requires increasing order for y
+        rev_y = y[::-1]
+        fid.create_dataset('row coordinate [m]', data=rev_y) # should it be y?
+        fid.create_dataset('col coordinate [m]', data=x)
 
         for key in dat.keys():
-            # dat must has shape (nband, ncol, nrow) or (nband, width, height) since HDF5 uses row-major ordering
-            assert(dat[key].shape[0] == time.shape[0])
-            assert(dat[key].shape[1] == x.shape[0])
-            assert(dat[key].shape[2] == y.shape[0])
+            # dat has shape (nband, ncol, nrow) 
+            # assert(dat[key].shape[0] == time.shape[0])
+            # assert(dat[key].shape[1] == x.shape[0])
+            # assert(dat[key].shape[2] == y.shape[0])
+            dat[key] = dat[key].swapaxes(1,2) # reshape to (nband, nrow, ncol)
             grp = fid.create_group(key)
             for i in range(len(time)):
-                grp.create_dataset(str(i), data=dat[key][i,:,:])
+                idat = dat[key][i,:,:]
+                # flip rows to match the order of y, so it starts with (x0,y0) in the upper left
+                rev_idat = np.flip(idat, axis=0)
+                
+                grp.create_dataset(str(i), data=rev_idat)
 
         for key, val in attrs.items():
             fid.attrs[key] = val
@@ -277,9 +293,9 @@ def xy_from_profile(profile):
     
     return x, y
 
-def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None):
+def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None, resolution = None):
     """
-    reproject daymet raw data to new CRS.
+    reproject daymet raw data to watershed CRS.
     """
     var_list = list(raw.keys())
     logging.debug(f"variables: {var_list}")
@@ -328,7 +344,8 @@ def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None):
     for var in var_list:
         # input raw array has the shape of (bands, cols, rows), need to transpose to (bands, rows, cols) for warp.raster()! 
         idat = raw[var].swapaxes(1,2)
-        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=idat, dst_crs=dst_crs, dst_nodata = dst_nodata)
+        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=idat, 
+                                    dst_crs=dst_crs, dst_nodata = dst_nodata, resolution = resolution)
 
         # dst_array has shape of (bands, rows, cols) need to flip back to (bands, cols, rows)
         dst_raster = dst_raster.swapaxes(1,2)
