@@ -123,17 +123,18 @@ def loadFile(fname, var):
 
 def initData(d, vars, num_days, nx, ny):
     for v in vars:
-        d[v] = np.zeros((num_days, nx, ny),'d')
+        # d[v] has shape (nband, nrow, ncol)
+        d[v] = np.zeros((num_days, ny, nx),'d')
 
 def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
     """Calls the DayMet Rest API to get data and save raw data.
     Parameters:
     vars: list or None
-        list of strings that are in VALID_VARIABLES.
+        list of strings that are in VALID_VARIABLES. Default is use all available variables.
     
     """
     T0 = time.time()
-    if vars is None:
+    if vars == None:
         vars = VALID_VARIABLES
         logging.info(f"downloading variables: {VALID_VARIABLES}")
 
@@ -149,18 +150,85 @@ def collectDaymet(tmpdir, bounds, start, end, vars=None, force=False):
                 d_inited = True
 
             # stuff v in the right spot
-            # dim(nband, nrow, ncol) has been transposed to dim(nband, ncol, nrow)
             if year == start.year and year == end.year:
-                dat[var][:,:,:] = np.transpose(v[start.doy-1:end.doy,:,:], (0,2,1)) # changed PS
+                dat[var][:,:,:] = v[start.doy-1:end.doy,:,:]
             elif year == start.year:
-                dat[var][0:365-start.doy+1,:,:] = np.transpose(v[start.doy-1:,:,:], (0,2,1))
+                dat[var][0:365-start.doy+1,:,:] = v[start.doy-1:,:,:]
             elif year == end.year:
-                dat[var][-end.doy:,:,:] = np.transpose(v[-end.doy:,:,:], (0,2,1))
+                dat[var][-end.doy:,:,:] = v[-end.doy:,:,:]
             else:
                 my_start = 365 * (year - start.year) - start.doy + 1
-                dat[var][my_start:my_start+365,:,:] = np.transpose(v, (0,2,1))
+                dat[var][my_start:my_start+365,:,:] = v
     logging.info(f'seconds to write: {time.time()-T0} s')
     return dat, x, y
+
+def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None, resolution = None):
+    """
+    reproject daymet raw data to watershed CRS.
+    """
+    var_list = list(raw.keys())
+    logging.debug(f"variables: {var_list}")
+    logging.debug(f"raw shape in (nband, nrow, ncol): {raw[var_list[0]].shape}")
+    
+    if raw[var_list[0]].ndim == 3:
+        nband = raw[var_list[0]].shape[0]   
+    else:
+        nband = 1 
+    
+    daymet_crs = workflow.crs.daymet_crs()
+    logging.debug(f'daymet crs: {daymet_crs}')
+    
+    # make sure tranform function is consistent with the unit used in CRS
+    unit = daymet_crs.to_dict()['units']
+    if unit == 'km':
+        dx = dy = 1.0 # km
+        transform = (x.min()/1000 - dx/2, dx, 0.0, y.max()/1000 + dy/2, 0.0, -dy) # accepted format(xmin, dx, 0, ymax, 0, -dy)
+        affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
+    elif unit == 'm':
+        dx = dy = 1000.0 # m
+        transform = (x.min() - dx/2, dx, 0.0, y.max() + dy/2, 0.0, -dy)
+        affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
+    else: 
+        raise RuntimeError(f'Daymet CRS unit: {unit} is not recognized! Supported units are m or km.')
+    logging.debug(f'transform: {transform}')
+    logging.debug(f'Affine: {affine}') 
+    
+    daymet_profile = {
+        'driver': 'GTiff', 
+        'dtype': 'float32', 
+        'nodata': -9999.0, 
+        'width': len(x), 
+        'height': len(y), 
+        'count': nband, 
+        'crs':daymet_crs,
+        'transform':affine,
+        'tiled': False, 
+        'interleave': 'pixel'
+    }
+
+    logging.info(f'daymet profile: {daymet_profile}') 
+    
+    logging.info(f'reprojecting to new crs: {dst_crs}') 
+    new_dat = {}
+    for var in var_list:
+        # if input raw array has the shape of (bands, cols, rows), need to transpose to (bands, rows, cols) for warp.raster()! 
+        # idat = raw[var].swapaxes(1,2)
+        idat = raw[var]
+        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=idat, 
+                                    dst_crs=dst_crs, dst_nodata = dst_nodata, resolution = resolution)
+
+        # dst_array has shape of (bands, rows, cols) need to flip back to (bands, cols, rows)
+        # dst_raster = dst_raster.swapaxes(1,2)
+        new_dat[var] = dst_raster    
+    
+    logging.info(f"new profile: {dst_profile}")
+    new_extent = rasterio.transform.array_bounds(dst_profile['height'], dst_profile['width'], dst_profile['transform']) # (x0, y0, x1, y1)
+
+    logging.info(f"new extent[xmin, ymin, xmax, ymax]: {new_extent}")
+    
+    new_x, new_y = xy_from_profile(dst_profile)
+    
+    return new_x, new_y, new_extent, new_dat, daymet_profile
 
 def daymetToATS(dat):
     """Accepts a numpy named array of DayMet data and returns a dictionary ATS data."""
@@ -201,7 +269,7 @@ def getAttrs(bounds, start, end):
 
 def writeATS(time, dat, x, y, attrs, filename):
     """Accepts a dictionary of ATS data and writes it to HDF5 file."""
-#     T0 = time.time()
+
     logging.info('Writing ATS file: {}'.format(filename))
 
     try:
@@ -220,11 +288,11 @@ def writeATS(time, dat, x, y, attrs, filename):
         fid.create_dataset('col coordinate [m]', data=x)
 
         for key in dat.keys():
-            # dat has shape (nband, ncol, nrow) 
-            # assert(dat[key].shape[0] == time.shape[0])
-            # assert(dat[key].shape[1] == x.shape[0])
-            # assert(dat[key].shape[2] == y.shape[0])
-            dat[key] = dat[key].swapaxes(1,2) # reshape to (nband, nrow, ncol)
+            # dat has shape (nband, nrow, ncol) 
+            assert(dat[key].shape[0] == time.shape[0])
+            assert(dat[key].shape[1] == y.shape[0])
+            assert(dat[key].shape[2] == x.shape[0])
+            # dat[key] = dat[key].swapaxes(1,2) # reshape to (nband, nrow, ncol)
             grp = fid.create_group(key)
             for i in range(len(time)):
                 idat = dat[key][i,:,:]
@@ -235,14 +303,11 @@ def writeATS(time, dat, x, y, attrs, filename):
 
         for key, val in attrs.items():
             fid.attrs[key] = val
-    
-#     logging.info(f'seconds to write: {time.time()-T0} s')
+
     return
 
 def validBounds(bounds):
     return True
-
-
 
 def getArgumentParser():
     """Gets an argparse parser for use in main"""
@@ -292,74 +357,6 @@ def xy_from_profile(profile):
     y = ymax - dy/2 - np.arange(ny) * dy
     
     return x, y
-
-def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None, resolution = None):
-    """
-    reproject daymet raw data to watershed CRS.
-    """
-    var_list = list(raw.keys())
-    logging.debug(f"variables: {var_list}")
-    logging.debug(f"raw shape in (nband, ncol, nrow): {raw[var_list[0]].shape}")
-    
-    if raw[var_list[0]].ndim == 3:
-        nband = raw[var_list[0]].shape[0]   
-    else:
-        nband = 1 
-    
-    daymet_crs = workflow.crs.daymet_crs()
-    logging.debug(f'daymet crs: {daymet_crs}')
-    
-    # make sure tranform function is consistent with the unit used in CRS
-    unit = daymet_crs.to_dict()['units']
-    if unit == 'km':
-        dx = dy = 1.0 # km
-        transform = (x.min()/1000 - dx/2, dx, 0.0, y.max()/1000 + dy/2, 0.0, -dy) # accepted format(xmin, dx, 0, ymax, 0, -dy)
-        affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
-    elif unit == 'm':
-        dx = dy = 1000.0 # m
-        transform = (x.min() - dx/2, dx, 0.0, y.max() + dy/2, 0.0, -dy)
-        affine = rasterio.transform.from_origin(x.min() - dx/2, y.max() + dy/2, dx, dy)
-    else: 
-        raise RuntimeError(f'Daymet CRS unit: {unit} is not recognized! Supported units are m or km.')
-    logging.debug(f'transform: {transform}')
-    logging.debug(f'Affine: {affine}') 
-    
-    daymet_profile = {
-        'driver': 'GTiff', 
-        'dtype': 'float32', 
-        'nodata': -9999.0, 
-        'width': len(x), 
-        'height': len(y), 
-        'count': nband, 
-        'crs':daymet_crs,
-        'transform':affine,
-        'tiled': False, 
-        'interleave': 'pixel'
-    }
-
-    logging.info(f'daymet profile: {daymet_profile}') 
-    
-    logging.info(f'reprojecting to new crs: {dst_crs}') 
-    new_dat = {}
-    for var in var_list:
-        # input raw array has the shape of (bands, cols, rows), need to transpose to (bands, rows, cols) for warp.raster()! 
-        idat = raw[var].swapaxes(1,2)
-        dst_profile, dst_raster = workflow.warp.raster(src_profile=daymet_profile, src_array=idat, 
-                                    dst_crs=dst_crs, dst_nodata = dst_nodata, resolution = resolution)
-
-        # dst_array has shape of (bands, rows, cols) need to flip back to (bands, cols, rows)
-        dst_raster = dst_raster.swapaxes(1,2)
-        new_dat[var] = dst_raster    
-    
-    logging.info(f"new profile: {dst_profile}")
-    new_extent = rasterio.transform.array_bounds(dst_profile['height'], dst_profile['width'], dst_profile['transform']) # (x0, y0, x1, y1)
-
-    logging.info(f"new extent[xmin, ymin, xmax, ymax]: {new_extent}")
-    
-    new_x, new_y = xy_from_profile(dst_profile)
-    
-    return new_x, new_y, new_extent, new_dat, daymet_profile
-
 
 if __name__ == '__main__':
     parser = getArgumentParser()
