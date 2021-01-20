@@ -13,6 +13,8 @@ import numpy as np
 import time
 import workflow
 import rasterio
+# import scipy
+from scipy.signal import savgol_filter
 
 VALID_YEARS = (1980,2019) # changed upper limit
 VALID_VARIABLES = ['tmin', 'tmax', 'prcp', 'srad', 'vp', 'swe', 'dayl']
@@ -230,26 +232,55 @@ def reproj_Daymet(x, y, raw, dst_crs, dst_nodata = None, resolution = None):
     
     return new_x, new_y, new_extent, new_dat, daymet_profile
 
-def daymetToATS(dat):
+def smoothRaw(raw, smooth_filter = True, nyears = None):
+
+    logging.info("averaging daymet by taking the average for each day across the actual years.")
+    var_list = list(raw.keys())
+    if nyears == None:
+        nyears = raw[var_list[0]].shape[0]//365 
+    # reshape dat
+    smooth_dat = dict()
+    for ivar in var_list:
+        idat = raw[ivar]
+        if nyears*365 != idat.shape[0]:
+            idat = idat[0:nyears*365, :, :]
+        idat = idat.reshape(nyears, 365, idat.shape[1], idat.shape[2])
+        # # average over years so that the dat has shape of (365, nx, ny)
+        inew = idat.mean(axis = 0)
+        
+        # apply smooth filter
+        if smooth_filter:
+            window = 61
+            poly_order = 2
+            logging.info(f"smoothing {ivar} using savgol filter, window = {window} d, poly order = {poly_order}")
+            inew = savgol_filter(inew, window, poly_order, axis = 0, mode = 'wrap')  
+        # repeat this for nyears
+        smooth_dat[ivar] = np.tile(inew, (nyears, 1, 1))   
+
+    return smooth_dat
+
+def daymetToATS(dat, smooth = False, smooth_filter = True, nyears = None):
     """Accepts a numpy named array of DayMet data and returns a dictionary ATS data."""
-    logging.debug(f"input dat shape: {dat['srad'].shape}")
+    logging.info(f"input dat shape: {dat[list(dat.keys())[0]].shape}")
     dout = dict()
     logging.info('Converting to ATS met input')
-
+    
+    if smooth:
+        dat = smoothRaw(dat, smooth_filter = smooth_filter, nyears = nyears)
+        logging.info(f"shape of smoothed dat is {dat[list(dat.keys())[0]].shape}")
     mean_air_temp_c = (dat['tmin'] + dat['tmax'])/2.0
     precip_ms = dat['prcp'] / 1.e3 / 86400. # mm/day --> m/s
     
     # Sat vap. press o/water Dingman D-7 (Bolton, 1980)
     sat_vp_Pa = 611.2 * np.exp(17.67 * mean_air_temp_c / (mean_air_temp_c + 243.5))
 
-    time = np.arange(0, dat['srad'].shape[0], 1)*86400.
+    time = np.arange(0, dat[list(dat.keys())[0]].shape[0], 1)*86400.
+
     dout['air temperature [K]'] = 273.15 + mean_air_temp_c # K
     dout['incoming shortwave radiation [W m^-2]'] = dat['srad'] # Wm2
     dout['relative humidity [-]'] = np.minimum(1.0, dat['vp']/sat_vp_Pa) # -
-
     dout['precipitation rain [m s^-1]'] = np.where(mean_air_temp_c >= 0, precip_ms, 0)
     dout['precipitation snow [m SWE s^-1]'] = np.where(mean_air_temp_c < 0, precip_ms, 0)
-
     dout['wind speed [m s^-1]'] = 4. * np.ones_like(dout['relative humidity [-]'])
 
     logging.debug(f"output dout shape: {dout['incoming shortwave radiation [W m^-2]'].shape}")
