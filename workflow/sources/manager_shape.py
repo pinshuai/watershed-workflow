@@ -36,7 +36,7 @@ class FileManagerShape:
 
         """
         profile, shps = self.get_shapes(*args, **kwargs)
-        if len(shps) is not 1:
+        if len(shps) != 1:
             raise RuntimeError("Filtered shapefile contains more than one match.")
         return profile, shps[0]
     
@@ -70,7 +70,7 @@ class FileManagerShape:
                 if index_or_bounds is not None and index_or_bounds >= 0:
                     shps = [fid[index_or_bounds],]
                 else:
-                    shps = fid[:]
+                    shps = [s for s in fid]
             else:
                 if crs is not None and not workflow.crs.equal(crs, workflow.crs.from_fiona(profile['crs'])):
                     bounds = workflow.warp.bounds(index_or_bounds, crs, workflow.crs.from_fiona(profile['crs']))
