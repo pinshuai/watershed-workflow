@@ -1,6 +1,7 @@
 import numpy as np
 import attr
 import sortedcontainers
+import logging
 
 @attr.s
 class Point:
@@ -30,7 +31,7 @@ def condition1(points, outletID=None):
 
     This is the origional, 2-pass algorithm.
     """
-    if outletID is None:
+    if outletID == None:
         outletID = np.argmin(np.array([points[i].coords[2] for i in range(len(points))]))
 
     # create a sorted list of elevations, from largest to smallest
@@ -41,7 +42,7 @@ def condition1(points, outletID=None):
     waterway = set([outletID,])
 
     # loop over elevation list from small to large
-    while len(elev) is not 0:
+    while len(elev) != 0:
         current, current_p = elev.pop()
         if current in visited:
             # still in the waterway
@@ -56,7 +57,7 @@ def condition1(points, outletID=None):
 
     # loop over waterway and raise up pits as they touch the waterway
     waterway = sorted([ (ID,points[ID]) for ID in waterway], key=lambda id_p:-id_p[1].coords[2])
-    while len(waterway) is not 0:
+    while len(waterway) != 0:
         current, current_p = waterway.pop()
         for n in current_p.neighbors:
             if n in pits:
@@ -84,7 +85,7 @@ def condition2(points, outletID):
     waterway = set([outletID,])
 
     # loop over elevation list from small to large
-    while len(elev) is not 0:
+    while len(elev) != 0:
         current, current_p = elev.pop(0)
         if current in waterway:
             # still in the waterway
@@ -160,7 +161,7 @@ def condition(mesh, outlet=None, algorithm=3):
      3: boundary marching method.  Should be fastest, and likely equivalent?
     """
     points_dict = points_from_mesh(mesh)
-    if outlet is None:
+    if outlet == None:
         boundary_nodes = mesh.boundary_nodes()
         outlet = boundary_nodes[np.argmin(mesh.coords[boundary_nodes,2])]
 
@@ -172,6 +173,7 @@ def condition(mesh, outlet=None, algorithm=3):
         condition3(points_dict, outlet)
     else:
         raise RuntimeError('Unknown algorithm "%r"'%(algorithm))
+    logging.info(f"mesh is conditioned in place by removing pits using algorithm = {algorithm} ")
 
     mesh.points = np.array([p.coords for p in points_dict.values()])
     
