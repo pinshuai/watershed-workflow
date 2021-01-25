@@ -256,7 +256,7 @@ def get_split_form_shapes(source, index_or_bounds=-1, crs=None, digits=None):
     return crs, workflow.split_hucs.SplitHUCs(shapes)
 
 
-def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, long=None, merge=True, presimplify=None):
+def get_reaches(source, huc, bounds=None, crs=None, cvrt = True, digits=None, long=None, merge=True, presimplify=None):
     """Get reaches from hydrography source within a given HUC and/or bounding box.
 
     Collects reach datasets within a HUC and/or a bounding box.  If bounds are
@@ -352,14 +352,16 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = False, digits=None, l
     return crs, reaches_s
 
 
-def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0., force = False,
-                        mask=False, nodata=-1):
+def get_raster_on_shape(source, shape, crs, raster_crs=None, resampling_res = None, resampling_method = None, 
+                        offset = 0, buffer=0., force = False,
+                        mask=False, nodata=None, plot_dem = False):
     """Collects a raster (e.g., DEM) that covers the requested shape.
 
     Parameters
     ----------
-    source : source-type
-        Source object providing a get_raster() method.
+    source : str or source-type
+        Filename to parse, or a source object providing the get_raster()
+        method.
     shape : Polygon
         Shapely or fiona polygon on which to get the raster.
     crs : crs-type
@@ -373,7 +375,7 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0., force = 
         If True, redownloading the raster regardless whether it exists.
     mask : bool, optional=False
         If True, mask the raster outside of shape.
-    nodata : dtype, optional=-1
+    nodata : dtype, optional=raster nodata
         Value to place outside of shape.
 
     Returns
@@ -388,26 +390,42 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0., force = 
     logging.info("Preprocessing Raster")
     logging.info("-"*30)
 
-    if type(shape) is dict:
+    if type(shape) == dict:
         shape = workflow.utils.shply(shape)
-    if type(shape) is shapely.geometry.MultiPolygon:
+    if type(shape) == shapely.geometry.MultiPolygon:
         shape = shapely.ops.cascaded_union(shape)
     shape = shape.buffer(buffer)
 
     logging.info("collecting raster")
-    if type(source) is str:
+    if type(source) == str:
         logging.info('loading file: "{}"'.format(source))
         source = workflow.sources.manager_raster.FileManagerRaster(source)
-        profile, raster = source.get_clipped_raster(shape, crs, nodata = nodata)
+        profile, raster = source.get_raster(shape, crs, offset = offset)
     else:
         profile, raster = source.get_raster(shape, crs, force = force)
     logging.info("Got raster of shape: {}".format(raster.shape))
+    logging.info("Got raster profile: {}".format(profile))
 
     # warp the raster to the requested output
-    if raster_crs != None:
-        profile, raster = workflow.warp.raster(profile, raster, raster_crs)
-    else:
+    if raster_crs != None and not workflow.crs.equal(crs, raster_crs):
+        logging.info("transforming crs...")
+        profile, raster = workflow.warp.raster(profile, raster, dst_crs = raster_crs)
+
+    if resampling_res != None:
+        if resampling_method == None:
+            resampling_method = rasterio.warp.Resampling.bilinear
+        logging.info(f"resamping raster using {resampling_method} method...")
+        resampling_algorithms = {'nearest':rasterio.warp.Resampling.nearest,
+                                'bilinear':rasterio.warp.Resampling.bilinear}
+        resampling_method = resampling_algorithms[resampling_method]
         raster_crs = workflow.crs.from_rasterio(profile['crs'])
+        
+        profile, raster = workflow.warp.raster(profile, raster, dst_crs = raster_crs, resolution=resampling_res, resampling_method=resampling_method)
+
+    raster_crs = workflow.crs.from_rasterio(profile['crs'])
+    logging.info("New raster of shape: {}".format(raster.shape))
+    # logging.info("New raster profile: {}".format(profile))
+
 
     if mask:
         # mask the raster
@@ -417,12 +435,42 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, buffer=0., force = 
         logging.info("shape bounds: {}".format(shape.bounds))
         mask = rasterio.features.geometry_mask([shape,], raster.shape,
                                                profile['transform'], invert=True)
-        raster = np.where(mask, raster, nodata)
+        if nodata == None:
+            if profile['nodata'] == None:
+                try:
+                    # surely there is a better way to see if dtype can handle nan?
+                    nodata = np.array([np.nan,], dtype=np.dtype(profile['dtype']))[0]
+                except:
+                    # surely there is a better way to get -1 as dtype?
+                    nodata = np.array([-1,], dtype=np.dtype(profile['dtype']))[0]
+                    profile['nodata'] = nodata
+                else:
+                    profile['nodata'] = nodata
+            else:
+                nodata = profile['nodata']
+
+        logging.info(f"Casting mask of dtype: {profile['dtype']} to: {nodata}")
+        raster[~mask] = nodata
 
     transform = profile['transform']
     x0 = transform * (0,0)
     x1 = transform * (profile['width'], profile['height'])
     logging.info("Raster bounds: {}".format((x0[0], x0[1], x1[0], x1[1])))
+
+    if plot_dem:
+
+        def nodata_minmax(array, nodata):
+            masked_array = np.ma.masked_equal(array, nodata, copy=False)
+            vmin,vmax = masked_array.min(), masked_array.max()
+            return vmin, vmax
+        vmin,vmax = nodata_minmax(raster, 0)
+        extent = rasterio.transform.array_bounds(profile['height'], profile['width'], profile['transform']) # (x0, y0, x1, y1)
+        plot_extent = extent[0], extent[2], extent[1], extent[3] # (x0, x1, y0, y1)
+        plt.figure()
+        cax = plt.matshow(raster, extent=plot_extent, vmin = vmin, vmax = vmax)
+        plt.plot(*shape.exterior.xy, 'r')
+        plt.colorbar(cax)
+
     return profile, raster
 
 
@@ -493,7 +541,7 @@ def find_huc(source, shape, crs, hint, shrink_factor=1.e-5):
                 logging.debug('  subhuc: %s does not contain'%hname)
         assert(False)
 
-    if type(shape) is shapely.geometry.Polygon:
+    if type(shape) == shapely.geometry.Polygon:
         shply = shape
     else:
         shply = workflow.utils.shply(shape)
@@ -712,8 +760,9 @@ def triangulate(hucs, rivers, diagnostics=True, verbosity=1, ignore_rivers = Fal
             areas.append(workflow.utils.triangle_area(verts))
             needs_refine.append(my_refine_func(verts, areas[-1]))
 
-        logging.info("  min area = {}".format(np.min(np.array(areas))))
-        logging.info("  max area = {}".format(np.max(np.array(areas))))
+        logging.info("  min area = {} m^2".format(np.min(np.array(areas))))
+        logging.info("  max area = {} m^2".format(np.max(np.array(areas))))
+        logging.info("  total area = {} m^2".format(np.sum(np.array(areas))))
 
         if verbosity > 0:
             plt.figure()

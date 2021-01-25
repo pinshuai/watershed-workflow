@@ -3,7 +3,9 @@
 
 import attr
 import rasterio
+import rasterio.windows
 import workflow
+import workflow.crs
 import numpy as np
 import logging
 
@@ -17,61 +19,61 @@ class FileManagerRaster:
       Path to the raster file.
     """
     _filename = attr.ib(type=str)
-    
-    def get_raster(self, band=1):
-        """Gets a raster from the file.
 
-        Parameter
-        ---------
+    def get_raster(self, shape, crs, band=1, offset = 0):
+        """Download and read a DEM for this shape, clipping to the shape.
+        
+        Parameters
+        ----------
+        shape : fiona or shapely shape
+          Shape to provide bounds of the raster.
+        crs : CRS
+          CRS of the shape.
         band : int,optional
           Default is 1, the first band (1-indexed).
+
+        Returns
+        -------
+        profile : rasterio profile
+          Profile of the raster.
+        raster : np.ndarray
+          Array containing the elevation data.
+        Note that the raster provided is in its native CRS (which is in the
+        rasterio profile), not the shape's CRS.
         """
-        with rasterio.open(self._filename, 'r') as fid:
-            profile = fid.profile
-            raster = fid.read(band)
-        return profile, raster
-
-    def get_clipped_raster(self, shape, crs, band=1, nodata = np.nan):
-        """Gets a raster from the file.
-
-        Parameter
-        ---------
-        band : int,optional
-          Default is 1, the first band (1-indexed).
-        """
-        # with rasterio.open(self._filename, 'r') as fid:
-        #     profile = fid.profile
-        #     raster = fid.read(band)
-        datasets = [rasterio.open(self._filename)]
-        profile = datasets[0].profile
-        # logging.info(f"src CRS: {profile['crs']}")
-
         if type(shape) is dict:
             shape = workflow.utils.shply(shape)
-        
-        # warp to source file crs
-        shply = workflow.warp.shply(shape, crs, profile['crs'])
 
-        # get the bounds and download
-        bounds = shply.bounds
-        feather_bounds = list(bounds[:])
-        feather_bounds[0] = feather_bounds[0] - .01
-        feather_bounds[1] = feather_bounds[1] - .01
-        feather_bounds[2] = feather_bounds[2] + .01
-        feather_bounds[3] = feather_bounds[3] + .01
-        # logging.info(f"feather bounds: {feather_bounds}")
+        with rasterio.open(self._filename, 'r') as fid:
+            profile = fid.profile
+            inv_transform = ~profile['transform']
 
-        dest, output_transform = rasterio.merge.merge(datasets, bounds=feather_bounds, nodata=nodata)
-        # dest = np.where(dest < -1.e-10, np.nan, dest)
+            # warp to my crs
+            my_crs = workflow.crs.from_rasterio(profile['crs'])
+            shply = workflow.warp.shply(shape, crs, my_crs)
+            bounds = shply.bounds
 
-        # set the profile
-        profile['transform'] = output_transform
-        profile['height'] = dest.shape[1]
-        profile['width'] = dest.shape[2]
-        profile['count'] = dest.shape[0]
-        profile['nodata'] = nodata
+            # find an appropriate window offset
+            x0, y0 = inv_transform * (bounds[0], bounds[3])
+            x0 = int(np.floor(x0)) - offset
+            y0 = int(np.floor(y0)) - offset
 
-        return profile, dest[0]        
+            # find an appropriate window size (works for degree based unit, but may not be enough for meter unit?)
+            x1, y1 = inv_transform * (bounds[2], bounds[1])
+            x1 = int(np.ceil(x1)) + offset
+            y1 = int(np.ceil(y1)) + offset
 
+            # create the window
+            window_profile = profile.copy()
+            window_profile['height'] = y1 - y0
+            window_profile['width'] = x1 - x0
 
-        # return profile, raster
+            window = rasterio.windows.Window(col_off=x0, row_off=y0,
+                                             width=window_profile['width'], height=window_profile['height'])
+            window_profile['transform'] = rasterio.windows.transform(window, profile['transform'])
+
+            raster = fid.read(band, window=window)
+            # return raster shape of (ncol, nrow)
+            assert(raster.shape == (window_profile['height'], window_profile['width']))
+
+        return window_profile, raster

@@ -54,7 +54,7 @@ def shape(feature, old_crs, new_crs):
     done = False
     while not done:
         if hasattr(ptr, '__len__'):        
-            assert(len(ptr) is not 0)
+            assert(len(ptr) != 0)
             dim += 1
             ptr = ptr[0]
         else:
@@ -68,7 +68,7 @@ def shape(feature, old_crs, new_crs):
     elif dim == 1:
         # line-like or polygon with no holes
         coords = np.array(feature['geometry']['coordinates'],'d')
-        assert(len(coords.shape) is 2 and coords.shape[1] in [2,3] )
+        assert(len(coords.shape) == 2 and coords.shape[1] in [2,3] )
         x,y = xy(coords[:,0], coords[:,1], old_crs, new_crs)
         new_coords = [xy for xy in zip(x,y)]
         feature['geometry']['coordinates'] = new_coords
@@ -78,7 +78,7 @@ def shape(feature, old_crs, new_crs):
         new_rings = []
         for i in range(len(feature['geometry']['coordinates'])):
             coords = np.array(feature['geometry']['coordinates'][i],'d')
-            assert(len(coords.shape) is 2 and coords.shape[1] in [2,3])
+            assert(len(coords.shape) == 2 and coords.shape[1] in [2,3])
             x,y = xy(coords[:,0], coords[:,1], old_crs, new_crs)
             new_coords = list(zip(x,y))
             new_rings.append(new_coords)
@@ -89,23 +89,23 @@ def shape(feature, old_crs, new_crs):
         for i in range(len(feature['geometry']['coordinates'])):
             for j in range(len(feature['geometry']['coordinates'][i])):
                 coords = np.array(feature['geometry']['coordinates'][i][j],'d')
-                assert(len(coords.shape) is 2 and coords.shape[1] in [2,3])
+                assert(len(coords.shape) == 2 and coords.shape[1] in [2,3])
                 x,y = xy(coords[:,0], coords[:,1], old_crs, new_crs)
                 new_coords = [xy for xy in zip(x,y)]
                 feature['geometry']['coordinates'][i][j] = new_coords
     return feature
                     
     
-def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = None, resolution = None, resampling_method = rasterio.warp.Resampling.nearest):
+def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = None, resolution = None, resampling_method = rasterio.warp.Resampling.bilinear):
     """Warp a raster from src_profile to dst_crs or dst_profile."""
-    if (dst_crs is None and dst_profile is None):
+    if (dst_crs == None and dst_profile == None and resolution == None):
         return src_profile, src_array
         
-    if dst_profile is not None and dst_crs is not None:
+    if dst_profile != None and dst_crs != None:
         if not workflow.crs.equal(dst_crs, workflow.crs.from_rasterio(dst_profile['crs'])):
             raise RuntimeError("Given both destination profile and crs, but not matching!")
 
-    if dst_crs is None:
+    if dst_crs == None:
         dst_crs_rasterio = dst_profile['crs']
         dst_crs = workflow.crs.from_rasterio(dst_crs_rasterio)
     else:
@@ -113,16 +113,16 @@ def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = 
 
     # return if no warp needed
     src_crs = workflow.crs.from_rasterio(src_profile['crs'])
-    if workflow.crs.equal(dst_crs, src_crs):
+    if workflow.crs.equal(dst_crs, src_crs) and resolution == None:
         return src_profile, src_array
 
     src_bounds = rasterio.transform.array_bounds(src_profile['height'], src_profile['width'], src_profile['transform'])
     logging.debug('Warping raster with bounds: {} to CRS: {}'.format(src_bounds, dst_crs))
     
-    if dst_nodata is None:
+    if dst_nodata == None:
         dst_nodata = src_profile['nodata']        
 
-    if dst_profile is None:
+    if dst_profile == None:
         dst_profile = src_profile.copy()
 
         # Calculate the ideal dimensions and transformation in the new crs
@@ -138,7 +138,7 @@ def raster(src_profile, src_array, dst_crs=None, dst_profile=None, dst_nodata = 
             'height': dst_height,
             'nodata': dst_nodata
         })
-
+        logging.info(f"dst_profile: {dst_profile}")
     # logging.info(f"src array shape: {src_array.shape}")
     # Reproject and return
     if src_array.ndim == 3:

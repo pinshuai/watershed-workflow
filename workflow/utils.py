@@ -101,17 +101,17 @@ def shply(shape, properties=None, flip=False):
     thing : shapely shape
     """
     if 'geometry' in shape:
-        if properties is None and 'properties' in shape:
+        if properties == None and 'properties' in shape:
             properties = shape['properties']
         shape = shape['geometry']        
     
     try:
         thing = shapely.geometry.shape(shape)
-        if type(thing) is shapely.geometry.MultiPoint and len(thing) is 1:
+        if type(thing) == shapely.geometry.MultiPoint and len(thing) == 1:
             thing = thing[0]
-        elif type(thing) is shapely.geometry.MultiLineString and len(thing) is 1:
+        elif type(thing) == shapely.geometry.MultiLineString and len(thing) == 1:
             thing = thing[0]
-        elif type(thing) is shapely.geometry.MultiPolygon and len(thing) is 1:
+        elif type(thing) == shapely.geometry.MultiPolygon and len(thing) == 1:
             thing = thing[0]
 
         # first check for latlon instead of lonlat
@@ -162,12 +162,12 @@ def close(s1, s2, tol=_tol):
     if isinstance(s1, (shapely.geometry.MultiPoint,
                        shapely.geometry.MultiLineString,
                        shapely.geometry.MultiPolygon)) and \
-       len(s1) is 1:
+       len(s1) == 1:
         return close(s1[0], s2, tol)
     if isinstance(s2, (shapely.geometry.MultiPoint,
                        shapely.geometry.MultiLineString,
                        shapely.geometry.MultiPolygon)) and \
-       len(s2) is 1:
+       len(s2) == 1:
         return close(s1, s2[0], tol)
 
     # types should be the same now
@@ -191,7 +191,7 @@ def close(s1, s2, tol=_tol):
         return False
 
     # compare polygons
-    elif type(s1) is shapely.geometry.Polygon:
+    elif type(s1) == shapely.geometry.Polygon:
         # note, this does not correctly deal with nonequal holes...
         if len(s1.boundary.coords) != len(s2.boundary.coords):
             return False
@@ -237,8 +237,8 @@ def cut(line, cutline, tol=1.e-5):
         plt.plot(cutline.xy[0], cutline.xy[1], 'k-x', linewidth=3)
         plt.plot(line.xy[0], line.xy[1], 'g-+', linewidth=3)
 
-    assert(type(line) is shapely.geometry.LineString)
-    assert(type(cutline) is shapely.geometry.LineString)
+    assert(type(line) == shapely.geometry.LineString)
+    assert(type(cutline) == shapely.geometry.LineString)
     assert(line.intersects(cutline))
 
     segs = []
@@ -250,11 +250,11 @@ def cut(line, cutline, tol=1.e-5):
         seg = shapely.geometry.LineString(coords[i:i + 2])
         #logging.debug("Intersecting seg %d"%i)
         point = seg.intersection(cutline)
-        if type(point) is shapely.geometry.LineString and len(point.coords) is 0:
+        if type(point) == shapely.geometry.LineString and len(point.coords) == 0:
             #logging.debug("Cut seg no intersection")
             segcoords.append(seg.coords[-1])
             i += 1
-        elif type(point) is shapely.geometry.Point:
+        elif type(point) == shapely.geometry.Point:
             #logging.debug("Cut intersected at point")
             #logging.debug("  inter point: %r"%list(point.coords[0]))
             #logging.debug("  seg final point: %r"%list(seg.coords[-1]))
@@ -274,12 +274,12 @@ def cut(line, cutline, tol=1.e-5):
                        # intersect at that seg's start point
             elif close(point, seg.coords[0], tol):
                 # intersects at the near point
-                if i is not 0:
+                if i != 0:
                     assert(len(segcoords) > 1)
                     segs.append(shapely.geometry.LineString(segcoords[:-1]+[point,]))
                     segcoords = [point,]
                 else:
-                    assert(len(segcoords) is 1)
+                    assert(len(segcoords) == 1)
                     segcoords[0] = point
                 segcoords.append(seg.coords[-1])
                 i += 1
@@ -375,9 +375,9 @@ def triangle_area(vertices):
 
 def center(objects, centering=True):
     """Centers a collection of objects by removing their collective centroid"""
-    if type(centering) is shapely.geometry.Point:
+    if type(centering) == shapely.geometry.Point:
         centroid = centering
-    elif centering is True or centering == 'geometric':
+    elif centering == True or centering == 'geometric':
         union = shapely.ops.cascaded_union(objects)
         centroid = shapely.geometry.Point([(union.bounds[0] + union.bounds[2])/2., (union.bounds[1] + union.bounds[3])/2.])
     elif centering == 'mass':
@@ -459,21 +459,21 @@ def merge(ml1, ml2):
         else:
             raise RuntimeError("ruh roh rorge")
 
-    if c1 is not None:
+    if c1 != None:
         new_ml.append(c1)
-    if c2 is not None:
+    if c2 != None:
         new_ml.append(c2)
     return new_ml
 
 
 def empty_shapely(shp):
-    if shp is None:
+    if shp == None:
         return True
-    if type(shp) is shapely.geometry.GeometryCollection and len(shp) is 0:
+    if type(shp) == shapely.geometry.GeometryCollection and len(shp) == 0:
         return True
-    if type(shp) is shapely.geometry.LineString and len(shp.coords) is 0:
+    if type(shp) == shapely.geometry.LineString and len(shp.coords) == 0:
         return True
-    if type(shp) is shapely.geometry.Polygon and len(shp.exterior.coords) is 0:
+    if type(shp) == shapely.geometry.Polygon and len(shp.exterior.coords) == 0:
         return True
     return False
         
@@ -498,3 +498,13 @@ def non_point_intersection(shp1, shp2):
     elif empty_shapely(inter):
         return False
     return True
+
+def flatten(list_of_shps):
+    """Flattens a list of shapes, that may contain Multi-objects, into  list without multi-objects"""
+    new_list = []
+    for shp in list_of_shps:
+        if type(shp) == shapely.geometry.MultiLineString or type(shp) == shapely.geometry.MultiPolygon:
+            new_list.extend([s for s in shp])
+        else:
+            new_list.append(shp)
+    return new_list
