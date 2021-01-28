@@ -354,7 +354,7 @@ def get_reaches(source, huc, bounds=None, crs=None, cvrt = True, digits=None, lo
 
 def get_raster_on_shape(source, shape, crs, raster_crs=None, resampling_res = None, resampling_method = None, 
                         offset = 0, buffer=0., force = False,
-                        mask=False, nodata=None, plot_dem = False):
+                        mask=False, nodata=None, plot_dem = False, plot_nodata = True):
     """Collects a raster (e.g., DEM) that covers the requested shape.
 
     Parameters
@@ -413,18 +413,18 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, resampling_res = No
 
     if resampling_res != None:
         if resampling_method == None:
-            resampling_method = rasterio.warp.Resampling.bilinear
+            resampling_method = "bilinear"
         logging.info(f"resamping raster using {resampling_method} method...")
         resampling_algorithms = {'nearest':rasterio.warp.Resampling.nearest,
                                 'bilinear':rasterio.warp.Resampling.bilinear}
         resampling_method = resampling_algorithms[resampling_method]
-        raster_crs = workflow.crs.from_rasterio(profile['crs'])
+        # raster_crs = workflow.crs.from_rasterio(profile['crs'])
         
-        profile, raster = workflow.warp.raster(profile, raster, dst_crs = raster_crs, resolution=resampling_res, resampling_method=resampling_method)
+        profile, raster = workflow.warp.raster(profile, raster, dst_crs = crs, resolution=resampling_res, resampling_method=resampling_method)
 
     raster_crs = workflow.crs.from_rasterio(profile['crs'])
     logging.info("New raster of shape: {}".format(raster.shape))
-    # logging.info("New raster profile: {}".format(profile))
+    logging.info("New raster crs: {}".format(profile['crs']))
 
 
     if mask:
@@ -467,9 +467,14 @@ def get_raster_on_shape(source, shape, crs, raster_crs=None, resampling_res = No
         extent = rasterio.transform.array_bounds(profile['height'], profile['width'], profile['transform']) # (x0, y0, x1, y1)
         plot_extent = extent[0], extent[2], extent[1], extent[3] # (x0, x1, y0, y1)
         plt.figure()
-        cax = plt.matshow(raster, extent=plot_extent, vmin = vmin, vmax = vmax)
+        if plot_nodata:
+            cax = plt.matshow(raster, extent=plot_extent)
+        else:
+            cax = plt.matshow(raster, extent=plot_extent, vmin = vmin, vmax = vmax)
+        if crs != raster_crs:
+            shape = workflow.warp.shply(shape, crs, raster_crs)
         plt.plot(*shape.exterior.xy, 'r')
-        plt.colorbar(cax)
+        plt.colorbar(cax,fraction=0.046, pad=0.04)
 
     return profile, raster
 
