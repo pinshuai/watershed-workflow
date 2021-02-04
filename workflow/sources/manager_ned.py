@@ -44,7 +44,8 @@ class FileManagerNED:
     """
     def __init__(self, resolution='1/3 arc-second', file_format='IMG'):
         """Create the manager."""
-        self.name = 'National Elevation Dataset (NED); resolution: {}'.format(resolution)
+        # self.name = 'National Elevation Dataset (NED); resolution: {}'.format(resolution)
+        self.name = 'National Elevation Dataset (NED)'
         self.file_format = file_format
 
         if resolution == '1/3 arc-second':
@@ -130,7 +131,9 @@ class FileManagerNED:
             r = requests.get(rest_url, params={'datasets':rest_dataset,
                                                'bbox':rest_bounds,
                                                'prodFormats':self.file_format})
-
+            logging.info(f"bbox: {rest_bounds}")
+            logging.info(f"datasets: {rest_dataset}")
+            logging.info(f"returned: {r.json()}")
         except requests.exceptions.ConnectionError as err:
             logging.error('{}: Failed to access REST API for NED DEM products.'.format(self.name))
             raise err
