@@ -242,7 +242,7 @@ def smoothRaw(raw, smooth_filter=True, nyears=None):
     return smooth_dat
 
 
-def daymetToATS(dat, smooth=False, smooth_filter=False, nyears=None):
+def daymetToATS(dat, time=None, smooth=False, smooth_filter=False, nyears=None):
     """Accepts a numpy named array of DayMet data and returns a dictionary ATS data. 
     It has the option to smooth the data.
     Parameters:
@@ -272,8 +272,11 @@ def daymetToATS(dat, smooth=False, smooth_filter=False, nyears=None):
     # Sat vap. press o/water Dingman D-7 (Bolton, 1980)
     sat_vp_Pa = 611.2 * np.exp(17.67 * mean_air_temp_c / (mean_air_temp_c+243.5))
 
-    time = np.arange(0, dat[list(dat.keys())[0]].shape[0], 1) * 86400.
-
+    if time is None:
+        time = np.arange(0, dat[list(dat.keys())[0]].shape[0], 1) * 86400.
+    assert time.shape[0] == dat[list(dat.keys())[0]].shape[0]
+    logging.info(f'time[0]={time[0]}')
+    
     dout['air temperature [K]'] = 273.15 + mean_air_temp_c  # K
     # note that shortwave radiation in daymet is averged over the unit daylength, not per unit day.
     dout['incoming shortwave radiation [W m^-2]'] = dat['srad'] * dat['dayl'] / 86400  # Wm2
@@ -290,14 +293,14 @@ def daymetToATS(dat, smooth=False, smooth_filter=False, nyears=None):
     return dout
 
 
-def writeATS(dat, x, y, attrs, filename, **kwargs):
+def writeATS(dat, x, y, attrs, filename, time=None, **kwargs):
     """Accepts a dictionary of ATS data and writes it to HDF5 file."""
     try:
         os.remove(filename)
     except FileNotFoundError:
         pass
 
-    dat = daymetToATS(dat, **kwargs)
+    dat = daymetToATS(dat,time=time, **kwargs)
 
     logging.info('Writing ATS file: {}'.format(filename))
     with h5py.File(filename, 'w') as fid:
