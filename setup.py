@@ -2,7 +2,7 @@ import os
 from os import path
 from setuptools import setup, find_packages
 import sys
-import versioneer
+# import versioneer
 import warnings
 
 # NOTE: This file must remain Python 2 compatible for the foreseeable future,
@@ -43,8 +43,8 @@ with open(path.join(here, 'requirements.txt')) as requirements_file:
 
 setup(
     name='watershed-workflow',
-    version=versioneer.get_version(),
-    cmdclass=versioneer.get_cmdclass(),
+    # version=versioneer.get_version(),
+    # cmdclass=versioneer.get_cmdclass(),
     description="Workflow tool that synthesizes datasets for use in integrated hydrologic models.",
     long_description=readme,
     author="Ethan Coon",
